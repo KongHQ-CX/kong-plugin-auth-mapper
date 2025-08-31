@@ -1,0 +1,33 @@
+_format_version: "3.0"
+_transform: true
+
+services:
+  - name: example-service
+    url: https://httpbin.konghq.com
+    routes:
+      - name: example-route
+        paths:
+          - /example
+        strip_path: true
+        methods:
+          - GET
+          - POST
+
+plugins:
+  - name: auth-mapper
+    enabled: true
+    protocols:
+      - http
+      - https
+    config:
+      client_id_header: client_id
+      client_secret_header: client_secret
+      concat_glue: ":"
+      auth_map:
+        id123:secret:
+          client_id: "abc123"
+          client_secret: "s3cr3t1"
+        id567:pass:
+          client_id: "def456"
+          client_secret: "s3cr3t2"
+
