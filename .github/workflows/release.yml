@@ -24,10 +24,12 @@ jobs:
           tag="${GITHUB_REF#refs/*/v}"
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
 
-      - name: Create rock file
+      - name: Setup Pongo
         uses: Kong/kong-pongo-action@v1
         with:
           pongo_version: master
+
+      - name: Create rock file
         run: |
           mkdir -p ./rocks
           pongo pack
