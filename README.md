@@ -139,44 +139,6 @@ wget https://github.com/KongHQ-CX/kong-plugin-auth-mapper/releases/download/v0.1
 docker build -t my-kong-with-auth-mapper .
 ```
 
-### Kubernetes Installation
-
-For Kubernetes deployments, you can use an init container to download and install the plugin:
-
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: kong
-spec:
-  template:
-    spec:
-      initContainers:
-      - name: install-auth-mapper
-        image: kong:3.9.1-alpine
-        command:
-        - sh
-        - -c
-        - |
-          wget -O /tmp/auth-mapper.rock https://github.com/KongHQ-CX/kong-plugin-auth-mapper/releases/download/vX.X.X/kong-plugin-auth-mapper-X.X.X-1.all.rock
-          luarocks install /tmp/auth-mapper.rock
-        volumeMounts:
-        - name: kong-plugins
-          mountPath: /usr/local/share/lua/5.1/kong/plugins
-      containers:
-      - name: kong
-        image: kong:3.9.1-alpine
-        env:
-        - name: KONG_PLUGINS
-          value: "bundled,auth-mapper"
-        volumeMounts:
-        - name: kong-plugins
-          mountPath: /usr/local/share/lua/5.1/kong/plugins
-      volumes:
-      - name: kong-plugins
-        emptyDir: {}
-```
-
 ### Verification
 
 After installation, verify the plugin is available:
