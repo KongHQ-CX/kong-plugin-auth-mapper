@@ -2,7 +2,7 @@
 local cjson = require("cjson")
 local plugin = {
   PRIORITY = 1060, -- before oidc runs
-  VERSION = "0.1.0",
+  VERSION = "0.2.0",
 }
 
 local set_header = kong.service.request.set_header
