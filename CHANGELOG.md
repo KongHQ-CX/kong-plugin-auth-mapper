@@ -5,6 +5,28 @@ All notable changes to the Kong Auth Mapper Plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2025-09-02
+
+### Added
+
+#### Flexible Matching Modes
+- **Client ID Only Mode**: New `client_id_only` matching mode that uses only the client ID for credential lookup
+- **Match Mode Configuration**: New `match_mode` parameter supporting `both` (default) and `client_id_only` options
+- **Backward Compatibility**: Default `both` mode maintains full compatibility with existing configurations
+
+#### Documentation
+- **Updated README**: Complete documentation for both matching modes with examples
+- **Configuration Guide**: Clear guidance on when to use each matching mode
+- **Request Flow Examples**: Before/after examples showing behavior differences
+
+### Technical Details
+
+#### Schema Changes
+- Added `match_mode` field with `one_of` validation
+- Maintains all existing field defaults and validation rules
+- Full backward compatibility with existing configurations
+
+
 ## [0.1.0] - 2025-09-02
 
 ### Added
@@ -114,4 +136,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-**Note**: This is the initial release of the Kong Auth Mapper Plugin. Future releases will be documented in this changelog following the same format.
+**Note**: This changelog documents all releases of the Kong Auth Mapper Plugin following semantic versioning.
