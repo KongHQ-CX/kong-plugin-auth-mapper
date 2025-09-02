@@ -52,6 +52,30 @@ The `auth_mappings_json` is a JSON string where:
 
 ## Installation
 
+### Option 1: Using Pre-built Rock File (Recommended for Golden Images)
+
+The easiest way to install the plugin is using the pre-built rock file from the GitHub releases:
+
+1. Download the rock file from the latest release:
+   ```bash
+   # Replace X.X.X with the desired version
+   wget https://github.com/KongHQ-CX/kong-plugin-auth-mapper/releases/download/vX.X.X/kong-plugin-auth-mapper-X.X.X-1.all.rock
+   ```
+
+2. Install the rock file:
+   ```bash
+   luarocks install kong-plugin-auth-mapper-X.X.X-1.all.rock
+   ```
+
+3. Add the plugin to your Kong configuration:
+   ```bash
+   export KONG_PLUGINS=bundled,auth-mapper
+   ```
+
+4. Restart Kong
+
+### Option 2: Manual Installation from Source
+
 1. Place the plugin files in your Kong plugins directory:
    ```
    kong/plugins/auth-mapper/
@@ -65,6 +89,107 @@ The `auth_mappings_json` is a JSON string where:
    ```
 
 3. Restart Kong
+
+### Docker/Golden Image Installation
+
+For Docker images or golden image builds, you can install the plugin during the image build process:
+
+**Option A: Download during build (requires internet access)**
+```dockerfile
+FROM kong:3.9.1-ubuntu
+
+USER root
+# Download and install the auth-mapper plugin
+RUN wget -O /tmp/kong-plugin-auth-mapper-0.1.0-1.all.rock https://github.com/KongHQ-CX/kong-plugin-auth-mapper/releases/download/v0.1.0/kong-plugin-auth-mapper-0.1.0-1.all.rock && \
+    /usr/local/bin/luarocks install /tmp/kong-plugin-auth-mapper-0.1.0-1.all.rock && \
+    rm /tmp/kong-plugin-auth-mapper-0.1.0-1.all.rock
+USER kong
+
+# Set environment variable to enable the plugin
+ENV KONG_PLUGINS=bundled,auth-mapper
+
+# Continue with your Docker image configuration...
+```
+
+**Option B: Copy pre-downloaded rock file (for air-gapped environments)**
+```dockerfile
+FROM kong:3.9.1-ubuntu
+
+# Copy the pre-downloaded rock file from build context
+COPY kong-plugin-auth-mapper-0.1.0-1.all.rock /tmp/kong-plugin-auth-mapper-0.1.0-1.all.rock
+
+USER root
+# Install the plugin and clean up
+RUN /usr/local/bin/luarocks install /tmp/kong-plugin-auth-mapper-0.1.0-1.all.rock && \
+    rm /tmp/kong-plugin-auth-mapper-0.1.0-1.all.rock
+USER kong
+
+# Set environment variable to enable the plugin
+ENV KONG_PLUGINS=bundled,auth-mapper
+
+# Continue with your Docker image configuration...
+```
+
+For Option B, ensure the rock file is in your Docker build context:
+```bash
+# Download the rock file locally first
+wget https://github.com/KongHQ-CX/kong-plugin-auth-mapper/releases/download/v0.1.0/kong-plugin-auth-mapper-0.1.0-1.all.rock
+
+# Then build your Docker image
+docker build -t my-kong-with-auth-mapper .
+```
+
+### Kubernetes Installation
+
+For Kubernetes deployments, you can use an init container to download and install the plugin:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kong
+spec:
+  template:
+    spec:
+      initContainers:
+      - name: install-auth-mapper
+        image: kong:3.9.1-alpine
+        command:
+        - sh
+        - -c
+        - |
+          wget -O /tmp/auth-mapper.rock https://github.com/KongHQ-CX/kong-plugin-auth-mapper/releases/download/vX.X.X/kong-plugin-auth-mapper-X.X.X-1.all.rock
+          luarocks install /tmp/auth-mapper.rock
+        volumeMounts:
+        - name: kong-plugins
+          mountPath: /usr/local/share/lua/5.1/kong/plugins
+      containers:
+      - name: kong
+        image: kong:3.9.1-alpine
+        env:
+        - name: KONG_PLUGINS
+          value: "bundled,auth-mapper"
+        volumeMounts:
+        - name: kong-plugins
+          mountPath: /usr/local/share/lua/5.1/kong/plugins
+      volumes:
+      - name: kong-plugins
+        emptyDir: {}
+```
+
+### Verification
+
+After installation, verify the plugin is available:
+
+```bash
+kong plugins list | grep auth-mapper
+```
+
+Or check if it's loaded in Kong:
+
+```bash
+curl -X GET http://localhost:8001/plugins/enabled
+```
 
 ## Usage Examples
 
