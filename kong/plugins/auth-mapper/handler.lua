@@ -31,14 +31,14 @@ local function header_value(name)
 end
 
 -- Resolve credentials with JSON parsing (used for caching)
-local function resolve_credentials(lookup_key, auth_mappings_json, fallback_id, fallback_secret)
-  kong.log.debug("[auth-mapper] resolving credentials for key: ", lookup_key)
+local function resolve_credentials(lookup_key, auth_mappings_json, fallback_id, fallback_secret, match_mode)
+  kong.log.debug("resolving credentials for key: ", lookup_key, " (mode: ", match_mode, ")")
 
   -- Parse JSON (this gets cached)
   local auth_map
   local ok, result = pcall(cjson.decode, auth_mappings_json)
   if not ok then
-    kong.log.error("[auth-mapper] failed to parse auth_mappings_json: ", result)
+    kong.log.error("failed to parse auth_mappings_json: ", result)
     -- Fallback to original credentials on JSON parse error
     auth_map = {}
   else
@@ -61,16 +61,16 @@ local function resolve_credentials(lookup_key, auth_mappings_json, fallback_id, 
     if mapped_id and mapped_secret then
       out_id = mapped_id
       out_secret = mapped_secret
-      kong.log.debug("[auth-mapper] using mapped credentials")
+      kong.log.debug("using mapped credentials")
     else
       out_id = fallback_id
       out_secret = fallback_secret
-      kong.log.debug("[auth-mapper] using fallback credentials (mapped values were null)")
+      kong.log.debug("using fallback credentials (mapped values were null)")
     end
   else
     out_id = fallback_id
     out_secret = fallback_secret
-    kong.log.debug("[auth-mapper] using fallback credentials")
+    kong.log.debug("using fallback credentials")
   end
 
   if not out_id or not out_secret then
@@ -89,42 +89,68 @@ function plugin:access(conf)
   local orig_id = header_value(conf.client_id_header)
   local orig_secret = header_value(conf.client_secret_header)
 
+  -- Both headers are required regardless of match mode (needed for Basic auth generation)
   if not orig_id or not orig_secret then
-    -- Nothing to do if either header is missing, do not fail the request
-    kong.log.debug("[auth-mapper] missing client headers, skipping")
+    kong.log.debug("missing client headers, skipping")
     return
   end
 
-  -- Build the lookup key
-  local glue = conf.concat_glue or ":"
-  local lookup_key = tostring(orig_id) .. glue .. tostring(orig_secret)
+  -- Determine match mode, default to "both" for backward compatibility
+  local match_mode = conf.match_mode or "both"
+
+  -- Build the lookup key based on match mode
+  local lookup_key
+  if match_mode == "client_id_only" then
+    lookup_key = tostring(orig_id)
+  else
+    local glue = conf.concat_glue or ":"
+    lookup_key = tostring(orig_id) .. glue .. tostring(orig_secret)
+  end
+
+  -- Fallback credentials
+  local fallback_id = orig_id
+  local fallback_secret = orig_secret
 
   local credentials, err
 
   if conf.cache_enabled then
     -- Use cache with configured TTL
     local cache_opts = { ttl = conf.cache_ttl }
-    local cache_key = "auth-mapper:" .. lookup_key
+    local cache_key = "auth-mapper:" .. match_mode .. ":" .. lookup_key
 
-    credentials, err =
-      kong.cache:get(cache_key, cache_opts, resolve_credentials, lookup_key, conf.auth_mappings_json, orig_id, orig_secret)
+    credentials, err = kong.cache:get(
+      cache_key,
+      cache_opts,
+      resolve_credentials,
+      lookup_key,
+      conf.auth_mappings_json,
+      fallback_id,
+      fallback_secret,
+      match_mode
+    )
 
     if err then
-      kong.log.warn("[auth-mapper] cache error: ", err)
+      kong.log.warn("cache error: ", err)
       return
     end
   else
     -- Direct resolution without caching
-    credentials, err = resolve_credentials(lookup_key, conf.auth_mappings_json, orig_id, orig_secret)
+    credentials, err = resolve_credentials(
+      lookup_key,
+      conf.auth_mappings_json,
+      fallback_id,
+      fallback_secret,
+      match_mode
+    )
 
     if err then
-      kong.log.warn("[auth-mapper] credential resolution error: ", err)
+      kong.log.warn("credential resolution error: ", err)
       return
     end
   end
 
   if not credentials then
-    kong.log.warn("[auth-mapper] failed to resolve credentials")
+    kong.log.warn("failed to resolve credentials")
     return
   end
 
@@ -138,7 +164,7 @@ function plugin:access(conf)
   -- Set on the request so subsequent plugins, including OIDC, can read it
   set_header("Authorization", basic_value)
 
-  kong.log.debug("[auth-mapper] Authorization header set successfully")
+  kong.log.debug("Authorization header set successfully (mode: ", match_mode, ")")
 end
 
 return plugin

@@ -11,7 +11,7 @@ for _, strategy in helpers.all_strategies() do
       lazy_setup(function()
         local bp = helpers.get_db_utils(strategy == "off" and "postgres" or strategy, nil, { PLUGIN_NAME })
 
-        -- Route with caching enabled
+        -- Route 1: Both mode with caching enabled
         local route1 = bp.routes:insert({
           hosts = { "cache-test.com" },
         })
@@ -23,13 +23,14 @@ for _, strategy in helpers.all_strategies() do
             client_id_header = "client_id",
             client_secret_header = "client_secret",
             concat_glue = ":",
+            match_mode = "both",
             cache_enabled = true,
             cache_ttl = 60, -- Short TTL for testing
             auth_mappings_json = '{"cache-test:secret":{"client_id":"cached-id","client_secret":"cached-secret"}}',
           },
         })
 
-        -- Route with caching disabled
+        -- Route 2: Both mode with caching disabled
         local route2 = bp.routes:insert({
           hosts = { "no-cache-test.com" },
         })
@@ -41,8 +42,44 @@ for _, strategy in helpers.all_strategies() do
             client_id_header = "client_id",
             client_secret_header = "client_secret",
             concat_glue = ":",
+            match_mode = "both",
             cache_enabled = false,
             auth_mappings_json = '{"no-cache:secret":{"client_id":"no-cache-id","client_secret":"no-cache-secret"}}',
+          },
+        })
+
+        -- Route 3: Client ID only mode with caching enabled
+        local route3 = bp.routes:insert({
+          hosts = { "client-id-cache.com" },
+        })
+
+        bp.plugins:insert({
+          name = PLUGIN_NAME,
+          route = { id = route3.id },
+          config = {
+            client_id_header = "client_id",
+            client_secret_header = "client_secret",
+            match_mode = "client_id_only",
+            cache_enabled = true,
+            cache_ttl = 60,
+            auth_mappings_json = '{"client-cache":{"client_id":"client-cached-id","client_secret":"client-cached-secret"}}',
+          },
+        })
+
+        -- Route 4: Client ID only mode with caching disabled
+        local route4 = bp.routes:insert({
+          hosts = { "client-id-no-cache.com" },
+        })
+
+        bp.plugins:insert({
+          name = PLUGIN_NAME,
+          route = { id = route4.id },
+          config = {
+            client_id_header = "client_id",
+            client_secret_header = "client_secret",
+            match_mode = "client_id_only",
+            cache_enabled = false,
+            auth_mappings_json = '{"client-no-cache":{"client_id":"client-no-cache-id","client_secret":"client-no-cache-secret"}}',
           },
         })
 
@@ -75,7 +112,7 @@ for _, strategy in helpers.all_strategies() do
         end
       end)
 
-      describe("cache functionality", function()
+      describe("cache functionality - both mode", function()
         it("caches resolved credentials on first request", function()
           local r = client:get("/request", {
             headers = {
@@ -189,6 +226,85 @@ for _, strategy in helpers.all_strategies() do
           local auth_header2 = assert.request(r2).has.header("authorization")
           local expected2 = "Basic " .. ngx.encode_base64("different:creds")
           assert.equal(expected2, auth_header2)
+        end)
+      end)
+
+      describe("cache functionality - client_id_only mode", function()
+        it("caches resolved credentials based on client_id only", function()
+          local r = client:get("/request", {
+            headers = {
+              host = "client-id-cache.com",
+              ["client_id"] = "client-cache",
+              ["client_secret"] = "any-secret", -- Should be ignored for lookup
+            },
+          })
+
+          assert.response(r).has.status(200)
+
+          local auth_header = assert.request(r).has.header("authorization")
+          local expected = "Basic " .. ngx.encode_base64("client-cached-id:client-cached-secret")
+          assert.equal(expected, auth_header)
+        end)
+
+        it("uses different cache keys for different modes", function()
+          -- Same client_id but different secrets - should use same mapping in client_id_only mode
+          local r1 = client:get("/request", {
+            headers = {
+              host = "client-id-cache.com",
+              ["client_id"] = "client-cache",
+              ["client_secret"] = "secret1",
+            },
+          })
+          local expected = "Basic " .. ngx.encode_base64("client-cached-id:client-cached-secret")
+
+          assert.response(r1).has.status(200)
+          local auth_header1 = assert.request(r1).has.header("authorization")
+          assert.equal(expected, auth_header1)
+
+          local r2 = client:get("/request", {
+            headers = {
+              host = "client-id-cache.com",
+              ["client_id"] = "client-cache",
+              ["client_secret"] = "secret2", -- Different secret, but should use same mapping
+            },
+          })
+
+          assert.response(r2).has.status(200)
+          local auth_header2 = assert.request(r2).has.header("authorization")
+          assert.equal(expected, auth_header2)
+        end)
+
+        it("works correctly with caching disabled in client_id_only mode", function()
+          local r = client:get("/request", {
+            headers = {
+              host = "client-id-no-cache.com",
+              ["client_id"] = "client-no-cache",
+              ["client_secret"] = "any-secret",
+            },
+          })
+
+          assert.response(r).has.status(200)
+
+          local auth_header = assert.request(r).has.header("authorization")
+          local expected = "Basic " .. ngx.encode_base64("client-no-cache-id:client-no-cache-secret")
+          assert.equal(expected, auth_header)
+        end)
+
+        it("caches fallback credentials when no client_id mapping exists", function()
+          local r = client:get("/request", {
+            headers = {
+              host = "client-id-cache.com",
+              ["client_id"] = "unmapped-client",
+              ["client_secret"] = "original-secret",
+            },
+          })
+
+          assert.response(r).has.status(200)
+
+          -- Should fallback to original credentials
+          local auth_header = assert.request(r).has.header("authorization")
+          local expected = "Basic " .. ngx.encode_base64("unmapped-client:original-secret")
+          assert.equal(expected, auth_header)
         end)
       end)
     end)

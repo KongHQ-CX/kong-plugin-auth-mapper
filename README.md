@@ -5,6 +5,7 @@ A Kong plugin that maps incoming client credentials to different credentials and
 ## Features
 
 - **Credential Mapping**: Transform incoming client credentials to different credentials based on configurable JSON mappings
+- **Flexible Matching Modes**: Support both full credential matching (`both`) and client ID-only matching (`client_id_only`)
 - **Vault Integration**: Support for Kong Vault references to securely store sensitive credential mappings
 - **Performance Caching**: Built-in LRU caching for resolved credentials to improve performance
 - **Flexible Headers**: Configure custom header names for client ID and secret
@@ -15,7 +16,9 @@ A Kong plugin that maps incoming client credentials to different credentials and
 ## How It Works
 
 1. The plugin reads client credentials from configurable request headers
-2. Concatenates them using a configurable glue character to create a lookup key
+2. Based on the matching mode, creates a lookup key:
+   - **Both mode**: Concatenates client_id and client_secret using a configurable glue character
+   - **Client ID only mode**: Uses only the client_id for lookup
 3. If caching is enabled, checks the cache for previously resolved credentials
 4. If not cached, parses the JSON mappings and searches for the lookup key
 5. If found, uses the mapped credentials; otherwise falls back to original credentials
@@ -30,20 +33,44 @@ A Kong plugin that maps incoming client credentials to different credentials and
 |-----------|------|---------|----------|-------------|
 | `client_id_header` | string | `"client_id"` | No | Header name containing the client ID |
 | `client_secret_header` | string | `"client_secret"` | No | Header name containing the client secret |
-| `concat_glue` | string | `":"` | No | Character(s) used to concatenate client_id and client_secret for lookup |
+| `concat_glue` | string | `":"` | No | Character(s) used to concatenate client_id and client_secret for lookup (ignored in client_id_only mode) |
+| `match_mode` | string | `"both"` | No | Matching mode: `"both"` (client_id + client_secret) or `"client_id_only"` |
 | `auth_mappings_json` | string | - | Yes | JSON string mapping input credentials to output credentials |
 | `cache_enabled` | boolean | `true` | No | Enable caching of resolved credentials |
 | `cache_ttl` | number | `300` | No | Cache TTL in seconds (must be > 0) |
 
+### Matching Modes
+
+#### Both Mode (Default)
+Uses both client_id and client_secret for credential lookup. This is the original behavior and provides enhanced security by requiring both credentials to match.
+
+**Lookup Key Format**: `client_id + concat_glue + client_secret`
+
+#### Client ID Only Mode
+Uses only the client_id for credential lookup, ignoring the client_secret in the mapping process. This is useful for scenarios where the client_id is stable but the client_secret may vary across environments or change frequently.
+
+**Lookup Key Format**: `client_id` (concat_glue is ignored)
+
+**Note**: Both client_id and client_secret headers are still required in both modes for Basic Authorization header generation.
+
 ### Auth Mappings JSON Structure
 
-The `auth_mappings_json` is a JSON string where:
-- **Keys**: Concatenated client credentials (client_id + concat_glue + client_secret)
-- **Values**: Objects containing the mapped credentials
+The `auth_mappings_json` structure varies based on the matching mode:
 
+#### Both Mode JSON Structure
 ```json
 {
   "input_id:input_secret": {
+    "client_id": "mapped_id",
+    "client_secret": "mapped_secret"
+  }
+}
+```
+
+#### Client ID Only Mode JSON Structure
+```json
+{
+  "input_id": {
     "client_id": "mapped_id",
     "client_secret": "mapped_secret"
   }
@@ -155,7 +182,7 @@ curl -X GET http://localhost:8001/plugins/enabled
 
 ## Usage Examples
 
-### Basic Configuration
+### Both Mode Configuration (Default)
 
 ```yaml
 plugins:
@@ -164,6 +191,7 @@ plugins:
       client_id_header: "client_id"
       client_secret_header: "client_secret"
       concat_glue: ":"
+      match_mode: "both"  # Default mode
       cache_enabled: true
       cache_ttl: 300  # 5 minutes
       auth_mappings_json: |
@@ -179,6 +207,30 @@ plugins:
         }
 ```
 
+### Client ID Only Mode Configuration
+
+```yaml
+plugins:
+  - name: auth-mapper
+    config:
+      client_id_header: "client_id"
+      client_secret_header: "client_secret"
+      match_mode: "client_id_only"
+      cache_enabled: true
+      cache_ttl: 300
+      auth_mappings_json: |
+        {
+          "legacy-app-id": {
+            "client_id": "modern-app-id",
+            "client_secret": "modern-app-secret"
+          },
+          "mobile-app-id": {
+            "client_id": "mobile-backend-id",
+            "client_secret": "mobile-backend-secret"
+          }
+        }
+```
+
 ### Custom Headers
 
 ```yaml
@@ -188,6 +240,7 @@ plugins:
       client_id_header: "x-app-id"
       client_secret_header: "x-app-secret"
       concat_glue: ":"
+      match_mode: "both"
       auth_mappings_json: |
         {
           "legacy-id:legacy-pass": {
@@ -197,7 +250,7 @@ plugins:
         }
 ```
 
-### Custom Separator
+### Custom Separator (Both Mode Only)
 
 ```yaml
 plugins:
@@ -206,6 +259,7 @@ plugins:
       client_id_header: "client_id"
       client_secret_header: "client_secret"
       concat_glue: "|"  # Use pipe instead of colon
+      match_mode: "both"
       cache_enabled: true
       cache_ttl: 300
       auth_mappings_json: |
@@ -226,6 +280,7 @@ plugins:
       # Enable caching with 10-minute TTL
       cache_enabled: true
       cache_ttl: 600
+      match_mode: "client_id_only"
       auth_mappings_json: "{vault://env/auth-mappings}"
 ```
 
@@ -237,6 +292,7 @@ plugins:
     config:
       # Disable caching for debugging or low-traffic scenarios
       cache_enabled: false
+      match_mode: "both"
       auth_mappings_json: |
         {
           "debug:mode": {
@@ -259,6 +315,7 @@ plugins:
       client_id_header: "client_id"
       client_secret_header: "client_secret"
       concat_glue: ":"
+      match_mode: "both"
       auth_mappings_json: "{vault://env/auth-mappings}"
 ```
 
@@ -297,6 +354,7 @@ services:
 plugins:
   - name: auth-mapper
     config:
+      match_mode: "client_id_only"
       auth_mappings_json: "{vault://env/auth-mappings}"
 ```
 
@@ -315,6 +373,7 @@ plugins:
   - name: auth-mapper
     route: production-route
     config:
+      match_mode: "both"
       auth_mappings_json: "{vault://env/prod-auth-mappings}"
 
 # Route 2: Staging mappings
@@ -322,6 +381,7 @@ plugins:
   - name: auth-mapper
     route: staging-route
     config:
+      match_mode: "client_id_only"
       auth_mappings_json: "{vault://env/staging-auth-mappings}"
 ```
 
@@ -350,9 +410,11 @@ Authorization: Basic <base64(client_id:client_secret)>
 
 The authorization header is set on the service request, making it available to downstream plugins and the upstream service.
 
-## Request Flow Example
+## Request Flow Examples
 
-### Input Request
+### Both Mode Example
+
+#### Input Request
 ```http
 GET /api/data HTTP/1.1
 Host: api.example.com
@@ -360,8 +422,9 @@ client_id: acme
 client_secret: s3cr3t
 ```
 
-### With Mapping Configuration
+#### With Both Mode Configuration
 ```yaml
+match_mode: "both"
 auth_mappings_json: |
   {
     "acme:s3cr3t": {
@@ -371,7 +434,7 @@ auth_mappings_json: |
   }
 ```
 
-### Resulting Upstream Request
+#### Resulting Upstream Request
 ```http
 GET /api/data HTTP/1.1
 Host: api.example.com
@@ -380,13 +443,48 @@ client_secret: s3cr3t
 Authorization: Basic YXp1cmUtYXBwLTEyMzphenVyZS1zZWNyZXQtNDU2
 ```
 
+### Client ID Only Mode Example
+
+#### Input Request
+```http
+GET /api/data HTTP/1.1
+Host: api.example.com
+client_id: mobile-app
+client_secret: dev-secret-123
+```
+
+#### With Client ID Only Mode Configuration
+```yaml
+match_mode: "client_id_only"
+auth_mappings_json: |
+  {
+    "mobile-app": {
+      "client_id": "backend-service-id",
+      "client_secret": "backend-service-secret"
+    }
+  }
+```
+
+#### Resulting Upstream Request
+```http
+GET /api/data HTTP/1.1
+Host: api.example.com
+client_id: mobile-app
+client_secret: dev-secret-123
+Authorization: Basic YmFja2VuZC1zZXJ2aWNlLWlkOmJhY2tlbmQtc2VydmljZS1zZWNyZXQ=
+```
+
+**Note**: In client_id_only mode, the client_secret (`dev-secret-123`) is ignored for mapping lookup, but the mapped credentials (`backend-service-id:backend-service-secret`) are used for the Authorization header.
+
 ## Performance and Caching
 
 ### Cache Behavior
 
 The plugin uses Kong's built-in caching system to store resolved credentials:
 
-- **Cache Key Format**: `auth-mapper:creds:{client_id}{glue}{client_secret}`
+- **Cache Key Format**:
+  - Both mode: `auth-mapper:both:{client_id}{glue}{client_secret}`
+  - Client ID only mode: `auth-mapper:client_id_only:{client_id}`
 - **Cache Hit**: Returns cached credentials immediately without parsing JSON
 - **Cache Miss**: Parses JSON, resolves vault references, and caches the result
 - **TTL Management**: Cached entries expire after the configured `cache_ttl` seconds
@@ -405,10 +503,13 @@ The plugin uses Kong's built-in caching system to store resolved credentials:
 - **Security**: Credentials are cached in memory only (not persisted to disk)
 - **Consistency**: Cache invalidation happens automatically after TTL expiry
 - **JSON Size**: Large JSON mappings may impact parsing performance on cache misses
+- **Mode Separation**: Different cache keys prevent conflicts between matching modes
 
 ## Use Cases
 
-### Azure Entra ID Integration
+### Both Mode Use Cases
+
+#### Azure Entra ID Integration
 Map legacy application credentials to Azure Entra ID application credentials:
 
 ```bash
@@ -420,11 +521,7 @@ export AZURE_MAPPINGS='{
 }'
 ```
 
-```yaml
-auth_mappings_json: "{vault://env/azure-mappings}"
-```
-
-### Multi-Tenant Applications
+#### Multi-Tenant Applications
 Route different client applications to their respective backend credentials:
 
 ```bash
@@ -440,12 +537,46 @@ export TENANT_MAPPINGS='{
 }'
 ```
 
-### API Gateway Credential Translation
+### Client ID Only Mode Use Cases
+
+#### Multi-Environment Applications
+Same client application across different environments with varying secrets:
+
+```bash
+export APP_MAPPINGS='{
+  "mobile-app": {
+    "client_id": "mobile-backend-prod-id",
+    "client_secret": "mobile-backend-prod-secret"
+  },
+  "web-app": {
+    "client_id": "web-backend-prod-id",
+    "client_secret": "web-backend-prod-secret"
+  }
+}'
+```
+
+#### Legacy System Integration
+When only client IDs are stable across system migrations:
+
+```bash
+export LEGACY_MAPPINGS='{
+  "legacy-system-1": {
+    "client_id": "modern-service-1-id",
+    "client_secret": "modern-service-1-secret"
+  },
+  "legacy-system-2": {
+    "client_id": "modern-service-2-id",
+    "client_secret": "modern-service-2-secret"
+  }
+}'
+```
+
+#### API Gateway Credential Translation
 Transform API keys to OAuth client credentials:
 
 ```bash
 export API_MAPPINGS='{
-  "api-key-123:shared-secret": {
+  "api-key-123": {
     "client_id": "oauth-client-for-api-123",
     "client_secret": "oauth-secret-123"
   }
@@ -459,6 +590,7 @@ export API_MAPPINGS='{
 3. **Logging**: The plugin logs JSON parsing errors - avoid enabling debug logging in production
 4. **Original Headers**: Original client headers remain in the request and are passed to upstream services
 5. **Complete Encryption**: The JSON approach allows encrypting all sensitive data including lookup keys
+6. **Header Requirements**: Both client_id and client_secret headers are required regardless of matching mode
 
 ## Plugin Priority
 
@@ -476,10 +608,11 @@ The plugin is designed to be non-breaking:
 
 The plugin includes comprehensive test suites:
 
-- **Unit Tests**: Test core functionality, JSON parsing, and edge cases
-- **Integration Tests**: Test real Kong request processing with JSON mappings
+- **Unit Tests**: Test core functionality, JSON parsing, and edge cases for both matching modes
+- **Integration Tests**: Test real Kong request processing with JSON mappings in both modes
 - **Vault Integration Tests**: Test vault reference resolution for complete JSON mappings
 - **Schema Tests**: Validate configuration schema and JSON string requirements
+- **Caching Tests**: Validate cache behavior for both matching modes
 
 Run tests with:
 ```bash

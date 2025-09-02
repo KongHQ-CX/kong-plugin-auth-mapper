@@ -5,16 +5,25 @@ services:
   - name: example-service
     url: https://httpbin.konghq.com
     routes:
-      - name: example-route
+      - name: both-mode-route
         paths:
-          - /example
+          - /both-mode
+        strip_path: true
+        methods:
+          - GET
+          - POST
+      - name: client-id-only-route
+        paths:
+          - /client-id-only
         strip_path: true
         methods:
           - GET
           - POST
 
 plugins:
+  # Both mode plugin (default) - requires both client_id and client_secret for lookup
   - name: auth-mapper
+    route: both-mode-route
     enabled: true
     protocols:
       - http
@@ -23,11 +32,46 @@ plugins:
       client_id_header: client_id
       client_secret_header: client_secret
       concat_glue: ":"
-      auth_map:
-        id123:secret:
-          client_id: "abc123"
-          client_secret: "s3cr3t1"
-        id567:pass:
-          client_id: "def456"
-          client_secret: "s3cr3t2"
+      match_mode: both  # Default mode
+      cache_enabled: true
+      cache_ttl: 300
+      auth_mappings_json: |
+        {
+          "legacy-id:legacy-secret": {
+            "client_id": "azure-app-123",
+            "client_secret": "azure-secret-456"
+          },
+          "acme:s3cr3t": {
+            "client_id": "entra-id-789",
+            "client_secret": "entra-secret-012"
+          }
+        }
 
+  # Client ID only mode plugin - uses only client_id for lookup
+  - name: auth-mapper
+    route: client-id-only-route
+    enabled: true
+    protocols:
+      - http
+      - https
+    config:
+      client_id_header: client_id
+      client_secret_header: client_secret
+      match_mode: client_id_only
+      cache_enabled: true
+      cache_ttl: 300
+      auth_mappings_json: |
+        {
+          "legacy-app": {
+            "client_id": "modern-app-id",
+            "client_secret": "modern-app-secret"
+          },
+          "mobile-app": {
+            "client_id": "mobile-backend-id",
+            "client_secret": "mobile-backend-secret"
+          },
+          "web-app": {
+            "client_id": "web-backend-id",
+            "client_secret": "web-backend-secret"
+          }
+        }
