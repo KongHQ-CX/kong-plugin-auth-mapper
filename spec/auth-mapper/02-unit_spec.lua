@@ -66,287 +66,418 @@ describe(PLUGIN_NAME .. ": (unit)", function()
     header_value = nil
   end)
 
-  it("injects mapped Basic Authorization on mapping hit", function()
-    local conf = {
-      client_id_header = "client_id",
-      client_secret_header = "client_secret",
-      concat_glue = ":",
-      auth_mappings_json = '{"acme:s3cr3t":{"client_id":"entra-id-1","client_secret":"entra-secret-1"}}',
-    }
+  describe("both mode (default)", function()
+    it("injects mapped Basic Authorization on mapping hit", function()
+      local conf = {
+        client_id_header = "client_id",
+        client_secret_header = "client_secret",
+        concat_glue = ":",
+        match_mode = "both",
+        auth_mappings_json = '{"acme:s3cr3t":{"client_id":"entra-id-1","client_secret":"entra-secret-1"}}',
+      }
 
-    plugin:access(conf)
+      plugin:access(conf)
 
-    local expected = "Basic " .. ngx.encode_base64("entra-id-1:entra-secret-1")
-    assert.equal("Authorization", header_name)
-    assert.equal(expected, header_value)
+      local expected = "Basic " .. ngx.encode_base64("entra-id-1:entra-secret-1")
+      assert.equal("Authorization", header_name)
+      assert.equal(expected, header_value)
+    end)
+
+    it("falls back to original credentials when no mapping found", function()
+      local conf = {
+        client_id_header = "client_id",
+        client_secret_header = "client_secret",
+        concat_glue = ":",
+        match_mode = "both",
+        auth_mappings_json = '{"different:credentials":{"client_id":"mapped-id","client_secret":"mapped-secret"}}',
+      }
+
+      plugin:access(conf)
+
+      local expected = "Basic " .. ngx.encode_base64("acme:s3cr3t")
+
+      assert.equal("Authorization", header_name)
+      assert.equal(expected, header_value)
+    end)
+
+    it("uses default both mode when match_mode not specified", function()
+      local conf = {
+        client_id_header = "client_id",
+        client_secret_header = "client_secret",
+        concat_glue = ":",
+        -- match_mode not specified - should default to "both"
+        auth_mappings_json = '{"acme:s3cr3t":{"client_id":"entra-id-1","client_secret":"entra-secret-1"}}',
+      }
+
+      plugin:access(conf)
+
+      local expected = "Basic " .. ngx.encode_base64("entra-id-1:entra-secret-1")
+      assert.equal("Authorization", header_name)
+      assert.equal(expected, header_value)
+    end)
+
+    it("skips processing when client_id header is missing", function()
+      local conf = {
+        client_id_header = "client_id_miss",
+        client_secret_header = "client_secret",
+        concat_glue = ":",
+        match_mode = "both",
+        auth_mappings_json = '{"acme:s3cr3t":{"client_id":"entra-id-1","client_secret":"entra-secret-1"}}',
+      }
+
+      plugin:access(conf)
+
+      assert.is_nil(header_name)
+      assert.is_nil(header_value)
+    end)
+
+    it("skips processing when client_secret header is missing", function()
+      local conf = {
+        client_id_header = "client_id",
+        client_secret_header = "missing_header",
+        concat_glue = ":",
+        match_mode = "both",
+        auth_mappings_json = '{"acme:s3cr3t":{"client_id":"entra-id-1","client_secret":"entra-secret-1"}}',
+      }
+
+      plugin:access(conf)
+
+      assert.is_nil(header_name)
+      assert.is_nil(header_value)
+    end)
   end)
 
-  it("falls back to original credentials when no mapping found", function()
-    local conf = {
-      client_id_header = "client_id",
-      client_secret_header = "client_secret",
-      concat_glue = ":",
-      auth_mappings_json = '{"different:credentials":{"client_id":"mapped-id","client_secret":"mapped-secret"}}',
-    }
+  describe("client_id_only mode", function()
+    it("injects mapped Basic Authorization on client_id mapping hit", function()
+      local conf = {
+        client_id_header = "client_id",
+        client_secret_header = "client_secret",
+        match_mode = "client_id_only",
+        auth_mappings_json = '{"acme":{"client_id":"mapped-id","client_secret":"mapped-secret"}}',
+      }
 
-    plugin:access(conf)
+      plugin:access(conf)
 
-    local expected = "Basic " .. ngx.encode_base64("acme:s3cr3t")
+      local expected = "Basic " .. ngx.encode_base64("mapped-id:mapped-secret")
+      assert.equal("Authorization", header_name)
+      assert.equal(expected, header_value)
+    end)
 
-    assert.equal("Authorization", header_name)
-    assert.equal(expected, header_value)
+    it("falls back to original credentials when no client_id mapping found", function()
+      local conf = {
+        client_id_header = "client_id",
+        client_secret_header = "client_secret",
+        match_mode = "client_id_only",
+        auth_mappings_json = '{"different-client":{"client_id":"mapped-id","client_secret":"mapped-secret"}}',
+      }
+
+      plugin:access(conf)
+
+      local expected = "Basic " .. ngx.encode_base64("acme:s3cr3t")
+      assert.equal("Authorization", header_name)
+      assert.equal(expected, header_value)
+    end)
+
+    it("skips processing when client_id header is missing", function()
+      local conf = {
+        client_id_header = "missing_client_id",
+        client_secret_header = "client_secret",
+        match_mode = "client_id_only",
+        auth_mappings_json = '{"acme":{"client_id":"mapped-id","client_secret":"mapped-secret"}}',
+      }
+
+      plugin:access(conf)
+
+      assert.is_nil(header_name)
+      assert.is_nil(header_value)
+    end)
+
+    it("skips processing when client_secret header is missing (needed for Basic auth)", function()
+      local conf = {
+        client_id_header = "client_id",
+        client_secret_header = "missing_secret",
+        match_mode = "client_id_only",
+        auth_mappings_json = '{"acme":{"client_id":"mapped-id","client_secret":"mapped-secret"}}',
+      }
+
+      plugin:access(conf)
+
+      -- Should skip because both headers are required regardless of mode
+      assert.is_nil(header_name)
+      assert.is_nil(header_value)
+    end)
+
+    it("works with different client_ids mapping to different credentials", function()
+      local conf = {
+        client_id_header = "client_id",
+        client_secret_header = "client_secret",
+        match_mode = "client_id_only",
+        auth_mappings_json = '{"acme":{"client_id":"acme-mapped","client_secret":"acme-secret"},"other":{"client_id":"other-mapped","client_secret":"other-secret"}}',
+      }
+
+      plugin:access(conf)
+
+      local expected = "Basic " .. ngx.encode_base64("acme-mapped:acme-secret")
+      assert.equal("Authorization", header_name)
+      assert.equal(expected, header_value)
+    end)
+
+    it("ignores concat_glue in client_id_only mode", function()
+      local conf = {
+        client_id_header = "client_id",
+        client_secret_header = "client_secret",
+        concat_glue = "|", -- Should be ignored in client_id_only mode
+        match_mode = "client_id_only",
+        auth_mappings_json = '{"acme":{"client_id":"mapped-id","client_secret":"mapped-secret"}}',
+      }
+
+      plugin:access(conf)
+
+      local expected = "Basic " .. ngx.encode_base64("mapped-id:mapped-secret")
+      assert.equal("Authorization", header_name)
+      assert.equal(expected, header_value)
+    end)
   end)
 
-  it("skips processing when client_id header is missing", function()
-    local conf = {
-      client_id_header = "client_id_miss",
-      client_secret_header = "client_secret",
-      concat_glue = ":",
-      auth_mappings_json = '{"acme:s3cr3t":{"client_id":"entra-id-1","client_secret":"entra-secret-1"}}',
-    }
+  describe("common behavior across modes", function()
+    it("skips processing when both headers are missing", function()
+      local conf = {
+        client_id_header = "missing_id_header",
+        client_secret_header = "missing_secret_header",
+        concat_glue = ":",
+        match_mode = "both",
+        auth_mappings_json = '{"acme:s3cr3t":{"client_id":"entra-id-1","client_secret":"entra-secret-1"}}',
+      }
 
-    plugin:access(conf)
+      plugin:access(conf)
 
-    assert.is_nil(header_name)
-    assert.is_nil(header_value)
-  end)
+      assert.is_nil(header_name)
+      assert.is_nil(header_value)
+    end)
 
-  it("skips processing when client_secret header is missing", function()
-    local conf = {
-      client_id_header = "client_id",
-      client_secret_header = "missing_header",
-      concat_glue = ":",
-      auth_mappings_json = '{"acme:s3cr3t":{"client_id":"entra-id-1","client_secret":"entra-secret-1"}}',
-    }
+    it("handles empty string headers as missing", function()
+      local conf = {
+        client_id_header = "empty_header",
+        client_secret_header = "client_secret",
+        concat_glue = ":",
+        match_mode = "both",
+        auth_mappings_json = '{"acme:s3cr3t":{"client_id":"entra-id-1","client_secret":"entra-secret-1"}}',
+      }
 
-    plugin:access(conf)
+      plugin:access(conf)
 
-    assert.is_nil(header_name)
-    assert.is_nil(header_value)
-  end)
+      assert.is_nil(header_name)
+      assert.is_nil(header_value)
+    end)
 
-  it("skips processing when both headers are missing", function()
-    local conf = {
-      client_id_header = "missing_id_header",
-      client_secret_header = "missing_secret_header",
-      concat_glue = ":",
-      auth_mappings_json = '{"acme:s3cr3t":{"client_id":"entra-id-1","client_secret":"entra-secret-1"}}',
-    }
+    it("handles whitespace-only headers as missing", function()
+      local conf = {
+        client_id_header = "whitespace_header",
+        client_secret_header = "client_secret",
+        concat_glue = ":",
+        match_mode = "both",
+        auth_mappings_json = '{"acme:s3cr3t":{"client_id":"entra-id-1","client_secret":"entra-secret-1"}}',
+      }
 
-    plugin:access(conf)
+      plugin:access(conf)
 
-    assert.is_nil(header_name)
-    assert.is_nil(header_value)
-  end)
+      assert.is_nil(header_name)
+      assert.is_nil(header_value)
+    end)
 
-  it("handles empty string headers as missing", function()
-    local conf = {
-      client_id_header = "empty_header",
-      client_secret_header = "client_secret",
-      concat_glue = ":",
-      auth_mappings_json = '{"acme:s3cr3t":{"client_id":"entra-id-1","client_secret":"entra-secret-1"}}',
-    }
+    it("uses first value when client_id header has multiple values", function()
+      local conf = {
+        client_id_header = "client_id_multi",
+        client_secret_header = "client_secret",
+        concat_glue = ":",
+        match_mode = "both",
+        auth_mappings_json = '{"first-id:s3cr3t":{"client_id":"mapped-id","client_secret":"mapped-secret"}}',
+      }
 
-    plugin:access(conf)
+      plugin:access(conf)
 
-    assert.is_nil(header_name)
-    assert.is_nil(header_value)
-  end)
+      local expected = "Basic " .. ngx.encode_base64("mapped-id:mapped-secret")
+      assert.equal("Authorization", header_name)
+      assert.equal(expected, header_value)
+    end)
 
-  it("handles whitespace-only headers as missing", function()
-    local conf = {
-      client_id_header = "whitespace_header",
-      client_secret_header = "client_secret",
-      concat_glue = ":",
-      auth_mappings_json = '{"acme:s3cr3t":{"client_id":"entra-id-1","client_secret":"entra-secret-1"}}',
-    }
+    it("uses first value when client_secret header has multiple values", function()
+      local conf = {
+        client_id_header = "client_id",
+        client_secret_header = "client_secret_multi",
+        concat_glue = ":",
+        match_mode = "both",
+        auth_mappings_json = '{"acme:first-secret":{"client_id":"mapped-id","client_secret":"mapped-secret"}}',
+      }
 
-    plugin:access(conf)
+      plugin:access(conf)
 
-    assert.is_nil(header_name)
-    assert.is_nil(header_value)
-  end)
+      local expected = "Basic " .. ngx.encode_base64("mapped-id:mapped-secret")
+      assert.equal("Authorization", header_name)
+      assert.equal(expected, header_value)
+    end)
 
-  it("uses first value when client_id header has multiple values", function()
-    local conf = {
-      client_id_header = "client_id_multi",
-      client_secret_header = "client_secret",
-      concat_glue = ":",
-      auth_mappings_json = '{"first-id:s3cr3t":{"client_id":"mapped-id","client_secret":"mapped-secret"}}',
-    }
+    it("uses default ':' glue when concat_glue is nil", function()
+      local conf = {
+        client_id_header = "client_id",
+        client_secret_header = "client_secret",
+        concat_glue = nil, -- Should default to ":"
+        match_mode = "both",
+        auth_mappings_json = '{"acme:s3cr3t":{"client_id":"entra-id-1","client_secret":"entra-secret-1"}}',
+      }
 
-    plugin:access(conf)
+      plugin:access(conf)
 
-    local expected = "Basic " .. ngx.encode_base64("mapped-id:mapped-secret")
-    assert.equal("Authorization", header_name)
-    assert.equal(expected, header_value)
-  end)
+      local expected = "Basic " .. ngx.encode_base64("entra-id-1:entra-secret-1")
 
-  it("uses first value when client_secret header has multiple values", function()
-    local conf = {
-      client_id_header = "client_id",
-      client_secret_header = "client_secret_multi",
-      concat_glue = ":",
-      auth_mappings_json = '{"acme:first-secret":{"client_id":"mapped-id","client_secret":"mapped-secret"}}',
-    }
+      assert.equal("Authorization", header_name)
+      assert.equal(expected, header_value)
+    end)
 
-    plugin:access(conf)
+    it("uses empty string glue when concat_glue is empty", function()
+      local conf = {
+        client_id_header = "client_id",
+        client_secret_header = "client_secret",
+        concat_glue = "", -- Empty string glue
+        match_mode = "both",
+        auth_mappings_json = '{"acmes3cr3t":{"client_id":"entra-id-1","client_secret":"entra-secret-1"}}',
+      }
 
-    local expected = "Basic " .. ngx.encode_base64("mapped-id:mapped-secret")
-    assert.equal("Authorization", header_name)
-    assert.equal(expected, header_value)
-  end)
+      plugin:access(conf)
 
-  it("uses default ':' glue when concat_glue is nil", function()
-    local conf = {
-      client_id_header = "client_id",
-      client_secret_header = "client_secret",
-      concat_glue = nil, -- Should default to ":"
-      auth_mappings_json = '{"acme:s3cr3t":{"client_id":"entra-id-1","client_secret":"entra-secret-1"}}',
-    }
+      local expected = "Basic " .. ngx.encode_base64("entra-id-1:entra-secret-1")
+      assert.equal("Authorization", header_name)
+      assert.equal(expected, header_value)
+    end)
 
-    plugin:access(conf)
+    it("uses custom glue character for lookup key", function()
+      local conf = {
+        client_id_header = "client_id",
+        client_secret_header = "client_secret",
+        concat_glue = "|", -- Custom glue character
+        match_mode = "both",
+        auth_mappings_json = '{"acme|s3cr3t":{"client_id":"entra-id-1","client_secret":"entra-secret-1"}}',
+      }
 
-    local expected = "Basic " .. ngx.encode_base64("entra-id-1:entra-secret-1")
+      plugin:access(conf)
 
-    assert.equal("Authorization", header_name)
-    assert.equal(expected, header_value)
-  end)
+      local expected = "Basic " .. ngx.encode_base64("entra-id-1:entra-secret-1")
+      assert.equal("Authorization", header_name)
+      assert.equal(expected, header_value)
+    end)
 
-  it("uses empty string glue when concat_glue is empty", function()
-    local conf = {
-      client_id_header = "client_id",
-      client_secret_header = "client_secret",
-      concat_glue = "", -- Empty string glue
-      auth_mappings_json = '{"acmes3cr3t":{"client_id":"entra-id-1","client_secret":"entra-secret-1"}}',
-    }
+    it("uses fallback injection when mapped client_id is missing", function()
+      local conf = {
+        client_id_header = "client_id",
+        client_secret_header = "client_secret",
+        concat_glue = ":",
+        match_mode = "both",
+        auth_mappings_json = '{"acme:s3cr3t":{"client_secret":"entra-secret-1"}}', -- Missing client_id
+      }
 
-    plugin:access(conf)
+      plugin:access(conf)
 
-    local expected = "Basic " .. ngx.encode_base64("entra-id-1:entra-secret-1")
-    assert.equal("Authorization", header_name)
-    assert.equal(expected, header_value)
-  end)
+      local expected = "Basic " .. ngx.encode_base64("acme:s3cr3t")
+      assert.equal(header_name, "Authorization")
+      assert.equal(header_value, expected)
+    end)
 
-  it("uses custom glue character for lookup key", function()
-    local conf = {
-      client_id_header = "client_id",
-      client_secret_header = "client_secret",
-      concat_glue = "|", -- Custom glue character
-      auth_mappings_json = '{"acme|s3cr3t":{"client_id":"entra-id-1","client_secret":"entra-secret-1"}}',
-    }
+    it("uses fallback injection when mapped client_secret is missing", function()
+      local conf = {
+        client_id_header = "client_id",
+        client_secret_header = "client_secret",
+        concat_glue = ":",
+        match_mode = "both",
+        auth_mappings_json = '{"acme:s3cr3t":{"client_id":"entra-id-1"}}', -- Missing client_secret
+      }
 
-    plugin:access(conf)
+      plugin:access(conf)
 
-    local expected = "Basic " .. ngx.encode_base64("entra-id-1:entra-secret-1")
-    assert.equal("Authorization", header_name)
-    assert.equal(expected, header_value)
-  end)
+      local expected = "Basic " .. ngx.encode_base64("acme:s3cr3t")
+      assert.equal(header_name, "Authorization")
+      assert.equal(header_value, expected)
+    end)
 
-  it("uses fallback injection when mapped client_id is missing", function()
-    local conf = {
-      client_id_header = "client_id",
-      client_secret_header = "client_secret",
-      concat_glue = ":",
-      auth_mappings_json = '{"acme:s3cr3t":{"client_secret":"entra-secret-1"}}', -- Missing client_id
-    }
+    it("uses fallback injection when mapped client_id is null", function()
+      local conf = {
+        client_id_header = "client_id",
+        client_secret_header = "client_secret",
+        concat_glue = ":",
+        match_mode = "both",
+        auth_mappings_json = '{"acme:s3cr3t":{"client_id":null,"client_secret":"entra-secret-1"}}', -- Explicit null
+      }
 
-    plugin:access(conf)
+      plugin:access(conf)
 
-    local expected = "Basic " .. ngx.encode_base64("acme:s3cr3t")
-    assert.equal(header_name, "Authorization")
-    assert.equal(header_value, expected)
-  end)
+      local expected = "Basic " .. ngx.encode_base64("acme:s3cr3t")
+      assert.equal(header_name, "Authorization")
+      assert.equal(header_value, expected)
+    end)
 
-  it("uses fallback injection when mapped client_secret is missing", function()
-    local conf = {
-      client_id_header = "client_id",
-      client_secret_header = "client_secret",
-      concat_glue = ":",
-      auth_mappings_json = '{"acme:s3cr3t":{"client_id":"entra-id-1"}}', -- Missing client_secret
-    }
+    it("uses fallback injection when mapped client_secret is null", function()
+      local conf = {
+        client_id_header = "client_id",
+        client_secret_header = "client_secret",
+        concat_glue = ":",
+        match_mode = "both",
+        auth_mappings_json = '{"acme:s3cr3t":{"client_id":"entra-id-1","client_secret":null}}', -- Explicit null
+      }
 
-    plugin:access(conf)
+      plugin:access(conf)
 
-    local expected = "Basic " .. ngx.encode_base64("acme:s3cr3t")
-    assert.equal(header_name, "Authorization")
-    assert.equal(header_value, expected)
-  end)
+      local expected = "Basic " .. ngx.encode_base64("acme:s3cr3t")
+      assert.equal(header_name, "Authorization")
+      assert.equal(header_value, expected)
+    end)
 
-  it("uses fallback injection when mapped client_id is null", function()
-    local conf = {
-      client_id_header = "client_id",
-      client_secret_header = "client_secret",
-      concat_glue = ":",
-      auth_mappings_json = '{"acme:s3cr3t":{"client_id":null,"client_secret":"entra-secret-1"}}', -- Explicit null
-    }
+    it("trims whitespace from header values before processing", function()
+      local conf = {
+        client_id_header = "client_id_trim",
+        client_secret_header = "client_secret_trim",
+        concat_glue = ":",
+        match_mode = "both",
+        auth_mappings_json = '{"acme:s3cr3t":{"client_id":"entra-id-1","client_secret":"entra-secret-1"}}',
+      }
 
-    plugin:access(conf)
+      plugin:access(conf)
 
-    local expected = "Basic " .. ngx.encode_base64("acme:s3cr3t")
-    assert.equal(header_name, "Authorization")
-    assert.equal(header_value, expected)
-  end)
+      local expected = "Basic " .. ngx.encode_base64("entra-id-1:entra-secret-1")
+      assert.equal("Authorization", header_name)
+      assert.equal(expected, header_value)
+    end)
 
-  it("uses fallback injection when mapped client_secret is null", function()
-    local conf = {
-      client_id_header = "client_id",
-      client_secret_header = "client_secret",
-      concat_glue = ":",
-      auth_mappings_json = '{"acme:s3cr3t":{"client_id":"entra-id-1","client_secret":null}}', -- Explicit null
-    }
+    it("handles malformed JSON gracefully", function()
+      local conf = {
+        client_id_header = "client_id",
+        client_secret_header = "client_secret",
+        concat_glue = ":",
+        match_mode = "both",
+        auth_mappings_json = '{"invalid": json}', -- Malformed JSON
+      }
 
-    plugin:access(conf)
+      plugin:access(conf)
 
-    local expected = "Basic " .. ngx.encode_base64("acme:s3cr3t")
-    assert.equal(header_name, "Authorization")
-    assert.equal(header_value, expected)
-  end)
+      -- Should fallback to original credentials when JSON parsing fails
+      local expected = "Basic " .. ngx.encode_base64("acme:s3cr3t")
+      assert.equal("Authorization", header_name)
+      assert.equal(expected, header_value)
+    end)
 
-  it("trims whitespace from header values before processing", function()
-    local conf = {
-      client_id_header = "client_id_trim",
-      client_secret_header = "client_secret_trim",
-      concat_glue = ":",
-      auth_mappings_json = '{"acme:s3cr3t":{"client_id":"entra-id-1","client_secret":"entra-secret-1"}}',
-    }
+    it("handles empty JSON object", function()
+      local conf = {
+        client_id_header = "client_id",
+        client_secret_header = "client_secret",
+        concat_glue = ":",
+        match_mode = "both",
+        auth_mappings_json = "{}", -- Empty JSON object
+      }
 
-    plugin:access(conf)
+      plugin:access(conf)
 
-    local expected = "Basic " .. ngx.encode_base64("entra-id-1:entra-secret-1")
-    assert.equal("Authorization", header_name)
-    assert.equal(expected, header_value)
-  end)
-
-  it("handles malformed JSON gracefully", function()
-    local conf = {
-      client_id_header = "client_id",
-      client_secret_header = "client_secret",
-      concat_glue = ":",
-      auth_mappings_json = '{"invalid": json}', -- Malformed JSON
-    }
-
-    plugin:access(conf)
-
-    -- Should fallback to original credentials when JSON parsing fails
-    local expected = "Basic " .. ngx.encode_base64("acme:s3cr3t")
-    assert.equal("Authorization", header_name)
-    assert.equal(expected, header_value)
-  end)
-
-  it("handles empty JSON object", function()
-    local conf = {
-      client_id_header = "client_id",
-      client_secret_header = "client_secret",
-      concat_glue = ":",
-      auth_mappings_json = '{}', -- Empty JSON object
-    }
-
-    plugin:access(conf)
-
-    -- Should fallback to original credentials when no mapping found
-    local expected = "Basic " .. ngx.encode_base64("acme:s3cr3t")
-    assert.equal("Authorization", header_name)
-    assert.equal(expected, header_value)
+      -- Should fallback to original credentials when no mapping found
+      local expected = "Basic " .. ngx.encode_base64("acme:s3cr3t")
+      assert.equal("Authorization", header_name)
+      assert.equal(expected, header_value)
+    end)
   end)
 end)

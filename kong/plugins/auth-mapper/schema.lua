@@ -32,10 +32,18 @@ return {
             },
           },
           {
+            match_mode = {
+              type = "string",
+              required = false,
+              default = "both",
+              one_of = { "both", "client_id_only" },
+            },
+          },
+          {
             auth_mappings_json = {
               type = "string",
               required = true,
-              referenceable = true, -- The entire JSON mapping can be from vault!
+              referenceable = true,
             },
           },
           {
@@ -49,7 +57,7 @@ return {
             cache_ttl = {
               type = "number",
               required = false,
-              default = 300, -- 5 minutes
+              default = 300,
               gt = 0,
             },
           },
