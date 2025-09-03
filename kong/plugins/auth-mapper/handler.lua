@@ -2,7 +2,7 @@
 local cjson = require("cjson")
 local plugin = {
   PRIORITY = 1060, -- before oidc runs
-  VERSION = "0.2.0",
+  VERSION = "0.3.0",
 }
 
 local set_header = kong.service.request.set_header
@@ -164,6 +164,12 @@ function plugin:access(conf)
   -- Set on the request so subsequent plugins, including OIDC, can read it
   set_header("Authorization", basic_value)
 
+  -- Strip original headers if configured
+  if conf.strip_original_headers then
+    kong.service.request.clear_header(conf.client_id_header)
+    kong.service.request.clear_header(conf.client_secret_header)
+    kong.log.debug("stripped original client headers")
+  end
   kong.log.debug("Authorization header set successfully (mode: ", match_mode, ")")
 end
 

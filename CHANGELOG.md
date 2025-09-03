@@ -5,6 +5,31 @@ All notable changes to the Kong Auth Mapper Plugin will be documented in this fi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2025-09-03
+
+### Added
+
+#### Header Security Enhancement
+- **Strip Original Headers**: New `strip_original_headers` configuration option to remove original client credential headers from upstream requests
+- **Enhanced Security**: Prevents sensitive original credentials from reaching upstream services after credential mapping
+- **Flexible Control**: Optional feature with default `false` to maintain backward compatibility
+
+#### Documentation
+- **Updated README**: Complete documentation for header stripping feature with examples
+- **Request Flow Examples**: Before/after examples showing header removal behavior
+
+### Technical Details
+
+#### Schema Changes
+- Added `strip_original_headers` boolean field with default `false`
+- Maintains full backward compatibility with existing configurations
+- Works with all existing match modes and configuration options
+
+#### Handler Changes
+- Added header removal logic using `kong.service.request.clear_header()`
+- Header stripping occurs after Authorization header generation
+- Applies to both `client_id_header` and `client_secret_header` regardless of match mode
+
 ## [0.2.0] - 2025-09-02
 
 ### Added
