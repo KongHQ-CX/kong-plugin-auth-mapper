@@ -61,6 +61,13 @@ return {
               gt = 0,
             },
           },
+          {
+            strip_original_headers = {
+              type = "boolean",
+              required = false,
+              default = false,
+            },
+          },
         },
         entity_checks = {
           { distinct = { "client_id_header", "client_secret_header" } },

@@ -38,6 +38,7 @@ A Kong plugin that maps incoming client credentials to different credentials and
 | `auth_mappings_json` | string | - | Yes | JSON string mapping input credentials to output credentials |
 | `cache_enabled` | boolean | `true` | No | Enable caching of resolved credentials |
 | `cache_ttl` | number | `300` | No | Cache TTL in seconds (must be > 0) |
+| `strip_original_headers` | boolean | `false` | No | Remove original client_id and client_secret headers from upstream request after mapping |
 
 ### Matching Modes
 
@@ -302,6 +303,25 @@ plugins:
         }
 ```
 
+### Strip Original Headers
+
+```yaml
+plugins:
+  - name: auth-mapper
+    config:
+      client_id_header: "client_id"
+      client_secret_header: "client_secret"
+      match_mode: "both"
+      strip_original_headers: true  # Remove original headers from upstream
+      auth_mappings_json: |
+        {
+          "legacy-app:legacy-pass": {
+            "client_id": "modern-client-id",
+            "client_secret": "modern-client-secret"
+          }
+        }
+```
+
 ## Vault Integration
 
 The plugin supports Kong Vault references for secure credential storage. With the JSON approach, you can store the entire credential mapping in a vault, providing complete security for all sensitive data including lookup keys.
@@ -476,6 +496,34 @@ Authorization: Basic YmFja2VuZC1zZXJ2aWNlLWlkOmJhY2tlbmQtc2VydmljZS1zZWNyZXQ=
 
 **Note**: In client_id_only mode, the client_secret (`dev-secret-123`) is ignored for mapping lookup, but the mapped credentials (`backend-service-id:backend-service-secret`) are used for the Authorization header.
 
+### Header Stripping
+
+When `strip_original_headers` is enabled (`true`), the plugin removes the original client ID and secret headers from the upstream request after credential mapping and Authorization header generation. This ensures sensitive original credentials are not passed to upstream services.
+
+- **Default**: `false` - Original headers are preserved
+- **When enabled**: Both client_id_header and client_secret_header are removed
+- **Applies to both modes**: Works with both `both` and `client_id_only` matching modes
+- **Security benefit**: Prevents original credentials from reaching upstream services
+
+### Request Flow with Header Stripping
+
+#### Input Request
+```http
+GET /api/data HTTP/1.1
+Host: api.example.com
+client_id: legacy-app
+client_secret: legacy-pass
+```
+
+#### Resulting Upstream Request (with strip_original_headers: true)
+```http
+GET /api/data HTTP/1.1
+Host: api.example.com
+Authorization: Basic bW9kZXJuLWNsaWVudC1pZDptb2Rlcm4tY2xpZW50LXNlY3JldA==
+```
+
+**Note**: Original `client_id` and `client_secret` headers are removed from the upstream request.
+
 ## Performance and Caching
 
 ### Cache Behavior
@@ -581,6 +629,21 @@ export API_MAPPINGS='{
     "client_secret": "oauth-secret-123"
   }
 }'
+```
+
+### Header Security
+Remove original credentials from upstream requests for enhanced security:
+
+```yaml
+config:
+  strip_original_headers: true
+  auth_mappings_json: |
+    {
+      "external-api-key:external-secret": {
+        "client_id": "internal-service-id",
+        "client_secret": "internal-service-secret"
+      }
+    }
 ```
 
 ## Security Considerations
